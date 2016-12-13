@@ -1,0 +1,11 @@
+sudo: false
+cache:
+  directories:
+    - "~/.platformio"
+language: python
+python:
+  - "2.7"
+install:
+  - pip install -U platformio
+script:
+  - platformio ci -C platformio.ini src
