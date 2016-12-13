@@ -33,7 +33,7 @@ And put 'em together like so:
 
 ![combined](https://cldup.com/fMvdKWfRuj.png)
 
-For the relay, I took a garden-variety ungrounded NEMA 1 extension cord, then cut and stripped it.  I "broke" the live wire by inserting it (from the male end) into the "NC" screw terminal. I then inserted the other live wire (from the female end) into the middle screw terminal.  I re-soldered the ends of the neutral wires (this is the wire corresponding to the "larger" of the two male blades) back together.
+For the relay, I took a garden-variety ungrounded NEMA 1 extension cord, then cut and stripped it.  I "broke" the live wire by inserting it (from the male end) into the "NC" screw terminal. I then inserted the other live wire (from the female end) into the middle screw terminal.  I re-soldered the ends of the neutral wires (this is the wire corresponding to the "larger" of the two male blades) back together and protected the connection with heat shrink.
 
 ## License
 
