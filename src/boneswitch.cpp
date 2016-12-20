@@ -1,18 +1,46 @@
 #include <Arduino.h>
 #include <Homie.h>
 #include <Boards.h>
+#include <ArduinoJson.h>
+#include <vector>
 
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "OCUnusedGlobalDeclarationInspection"
-#define DEFAULT_DATA_PIN D1
-#define DEFAULT_ON_AT_START true
 
 using namespace std;
 
-HomieNode switchNode("switch", "switch");
+struct Pin {
+  uint8_t pin;
+  bool normallyOpen;
+};
 
-HomieSetting<long> dataPinSetting("data_pin", "Data pin for relay");
-HomieSetting<bool> initSetting("on_at_start", "If true, relay will be \"on\" at start");
+vector<Pin> pins;
+
+HomieNode switchesNode("switches", "switches");
+
+HomieSetting<const char *> pinSettings("pins", "Data pin settings (JSON)");
+
+bool switchHandler (const HomieRange &range, const String &value) {
+  if (!range.isRange || range.index < 0 || range.index > pins.size()) {
+    Homie.getLogger() << "Range is a range? " << range.isRange << endl << "Range index: " << range.index << endl << "Pins: " << pins.size();
+    return true;
+  }
+  if (!(value.equalsIgnoreCase("true") || value.equalsIgnoreCase("false"))) {
+    Homie.getLogger() << "Invalid value: " << value << endl;
+    return true;
+  }
+  bool on = value.equalsIgnoreCase("true") != 0;
+  Pin p = pins[range.index];
+  if (p.normallyOpen) {
+    Homie.getLogger() << "On? " << on << endl << "Writing pin " << p.pin << " " << (on ? "low" : "high") << endl;
+    digitalWrite(p.pin, (uint8_t) (on ? LOW : HIGH));
+  } else {
+    Homie.getLogger() << "On? " << on << endl << "Writing pin " << p.pin << " " << (on ? "high" : "low") << endl;
+    digitalWrite(p.pin, (uint8_t) (on ? HIGH : LOW));
+  }
+  switchesNode.setProperty("on").setRange(range).send(value);
+  return true;
+}
 
 void setup () {
   Serial.begin(115200);
@@ -20,33 +48,70 @@ void setup () {
 
   // these two handlers start "doing actual stuff" if Homie boots in "normal"
   // mode, which is why the stuff they do is not in this function.
-  Homie.setSetupFunction(function<void()>([] () {
-    uint8_t dataPin = dataPinSetting.get();
-    pinMode(dataPin, OUTPUT);
-    digitalWrite(dataPin, (uint8_t)(initSetting.get() ? HIGH : LOW));
-    switchNode.setProperty("on").send("false");
+  Homie.setSetupFunction(function<void ()>([] () {
+    StaticJsonBuffer<255> jsonBuffer;
+    JsonArray &root = jsonBuffer.parseArray(pinSettings.get());
+    pins.reserve(root.size());
+
+    for (int i = 0; i < root.size(); i++) {
+      uint8_t pinNumber;
+      bool normallyOpen;
+      if (root[i].is<JsonObject &>()) {
+        JsonObject &relay = root[i].asObject();
+        pinNumber = relay["pin"].as<uint8_t>();
+        if (relay.containsKey("normally_open")) {
+          normallyOpen = relay["normally_open"];
+        } else {
+          normallyOpen = false;
+        }
+      } else {
+        pinNumber = (uint8_t) root[i];
+        normallyOpen = false;
+      }
+      pinMode(pinNumber, OUTPUT);
+      Homie.getLogger() << "Resetting pin " << i << endl;
+      digitalWrite(pinNumber, (uint8_t) (normallyOpen ? HIGH : LOW));
+      Pin pin = {pinNumber, normallyOpen};
+      pins.push_back(pin);
+    }
   }));
 
-  // the settings' defaults should be present for config mode.
-  dataPinSetting.setDefaultValue(DEFAULT_DATA_PIN).setValidator(
-    function<bool (long)>([] (long value) {
-      return IS_PIN_DIGITAL(value);
+  pinSettings.setDefaultValue("[{pin: 1, normally_open: false}]").setValidator(
+    function<bool (const char*)>([] (const char * value) {
+      StaticJsonBuffer<255> jsonBuffer;
+      JsonArray &root = jsonBuffer.parseArray(value);
+      if (!root.success()) {
+        Homie.getLogger() << "Failed to parse root array" << endl;
+        return false;
+      }
+      if (root.size() == 0) {
+        Homie.getLogger() << "Empty root array" << endl;
+        return false;
+      }
+      for (int i = 0; i < root.size(); i++) {
+        if (root[i].is<long>() && !IS_PIN_DIGITAL(root[i])) {
+          Homie.getLogger() << "Raw pin '" << root[i].asString() << "' not valid" << endl;
+          return false;
+        }
+        if (root[i].is<JsonObject &>()) {
+          JsonObject &o = root[i].asObject();
+          if (!o.containsKey("pin")) {
+            Homie.getLogger() << "Array item " << i << " has no 'pin' property" << endl;
+            return false;
+          }
+          if (o["pin"].is<long>() && !IS_PIN_DIGITAL(o["pin"])) {
+            Homie.getLogger() << "Array item " << i << " has invalid 'pin' property" << endl;
+            return false;
+          }
+        } else {
+          Homie.getLogger() << "Invalid array item at index " << i << endl;
+          return false;
+        }
+      }
+      return true;
     }));
 
-  initSetting.setDefaultValue(DEFAULT_ON_AT_START);
-
-  switchNode.advertise("on").settable(function<bool (const HomieRange &, const String &)>([] (const HomieRange &range, const String &value) {
-    uint8_t dataPin = dataPinSetting.get();
-    if (value.equalsIgnoreCase("true") || value.equals("1")) {
-      digitalWrite(dataPin, HIGH);
-      switchNode.setProperty("on").send("true");
-    } else {
-      digitalWrite(dataPin, LOW);
-      switchNode.setProperty("on").send("false");
-    }
-    return true;
-  }));
-
+  switchesNode.advertiseRange("on", 0, 7).settable(switchHandler);
   Homie.setup();
 }
 
